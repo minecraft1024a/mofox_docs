@@ -1,0 +1,36 @@
+{
+  "name": "mofox_docs",
+  "version": "1.0.0",
+  "description": "通过 MoFox-Bot-Docs 文档 JSON API 查询和获取 Neo-MoFox 官方文档，供 LLM 检索与阅读使用",
+  "author": "MoFox Community",
+  "dependencies": {
+    "plugins": [],
+    "components": []
+  },
+  "include": [
+    {
+      "component_type": "tool",
+      "component_name": "docs_query",
+      "dependencies": [],
+      "enabled": true
+    }
+  ],
+  "entry_point": "plugin.py",
+  "min_core_version": "1.0.0",
+  "api_version": {
+    "log_api": "1.0.0"
+  },
+  "python_dependencies": [
+    "aiohttp"
+  ],
+  "dependencies_required": true,
+  "categories": [
+    "information"
+  ],
+  "tags": [
+    "docs",
+    "documentation",
+    "search",
+    "mofox"
+  ]
+}
