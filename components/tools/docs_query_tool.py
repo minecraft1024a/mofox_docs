@@ -1,8 +1,8 @@
 """MoFox 文档查询工具。
 
 提供 LLM 可调用的文档检索能力：
-- 获取所有文档列表
-- 按关键词检索（基于 llms.json，在本地对标题 / 简介 / 预览过滤）
+- 列出文档（基于 llms.json，按 section 排序，部署指南在前）
+- 按关键词检索（多关键词 AND 匹配标题 / 简介 / 预览 / 路径）
 - 获取指定文档的完整内容
 
 所有查询均为只读操作，不产生任何副作用。
@@ -37,8 +37,8 @@ class DocsQueryTool(BaseTool):
 
     name: str = "docs_query"
     description: str = (
-        "查询 Neo-MoFox 官方文档。支持列出所有文档、按关键词检索（基于 llms.json "
-        "索引，在本地对标题 / 简介 / 正文预览过滤）、以及获取指定文档全文。"
+        "查询 Neo-MoFox 官方文档。支持列出文档（按 section 排序，部署指南在前）、"
+        "按关键词检索（多关键词同时匹配，支持 offset 分页）、获取指定文档全文。"
         "当用户询问框架功能、配置、插件开发、API 用法等问题时使用。"
     )
 
@@ -93,12 +93,12 @@ class DocsQueryTool(BaseTool):
         self,
         action: Annotated[
             str,
-            "操作类型：list(列出所有文档) / search(按关键词检索 llms.json 索引) "
-            "/ get(获取指定文档全文)",
+            "操作类型：list(列出文档) / search(按关键词检索) / get(获取指定文档全文)",
         ],
         query: Annotated[str | None, "检索关键词，仅 search 使用"] = None,
         doc_id: Annotated[str | None, "文档唯一标识，仅 get 使用，如 guides/configuration/bot_config_guide"] = None,
         limit: Annotated[int, "返回结果数量限制，仅 list / search 使用"] = 20,
+        offset: Annotated[int, "结果偏移量，用于分页，仅 list / search 使用"] = 0,
     ) -> tuple[bool, str | dict[str, Any]]:
         """执行文档查询操作。
 
@@ -107,6 +107,7 @@ class DocsQueryTool(BaseTool):
             query: 检索关键词
             doc_id: 文档唯一标识
             limit: 结果数量限制
+            offset: 结果偏移量（分页）
 
         Returns:
             tuple[bool, str | dict]: (是否成功, 查询结果或错误信息)
@@ -115,9 +116,9 @@ class DocsQueryTool(BaseTool):
             client = self._get_client()
 
             if action == "list":
-                return await self._handle_list(client, limit)
+                return await self._handle_list(client, limit, offset)
             if action == "search":
-                return await self._handle_search(client, query, limit)
+                return await self._handle_search(client, query, limit, offset)
             if action == "get":
                 return await self._handle_get(client, doc_id)
             return False, f"不支持的操作类型: {action}。支持的类型: list, search, get"
@@ -132,32 +133,42 @@ class DocsQueryTool(BaseTool):
             return False, f"执行查询时发生错误: {e}"
 
     async def _handle_list(
-        self, client: DocsClient, limit: int
+        self, client: DocsClient, limit: int, offset: int
     ) -> tuple[bool, str | dict[str, Any]]:
-        """处理列出所有文档操作。"""
+        """处理列出文档操作。
+
+        使用 llms.json 索引（按 section 排序，部署类指南在前），
+        每篇含 title / description / preview / section，方便定位文档。
+        """
         if limit < 1:
             limit = 1
         if limit > 100:
             limit = 100
+        if offset < 0:
+            offset = 0
 
-        data = await client.get_index()
+        data = await client.get_llms()
         docs = data.get("docs", [])
+        page = docs[offset : offset + limit]
         output = {
             "type": "docs_index",
             "action": "list",
             "total": data.get("total", len(docs)),
-            "count": min(limit, len(docs)),
-            "docs": docs[:limit],
+            "offset": offset,
+            "count": len(page),
+            "docs": page,
         }
         return True, output
 
     async def _handle_search(
-        self, client: DocsClient, query: str | None, limit: int
+        self, client: DocsClient, query: str | None, limit: int, offset: int
     ) -> tuple[bool, str | dict[str, Any]]:
         """处理按关键词检索操作。
 
         文档站已移除服务端搜索，改为拉取 llms.json 索引后在本地过滤：
-        匹配 title / description / preview / section / id / path。
+        查询按空白拆分为多个关键词，按"命中的关键词数量"降序返回
+        （命中全部关键词的文档排最前，至少命中一个即返回）。
+        匹配字段：title / description / preview / section / id / path。
         命中结果不含完整正文，需要全文时再用 action="get" 获取。
         """
         if not query:
@@ -167,15 +178,15 @@ class DocsQueryTool(BaseTool):
             limit = 1
         if limit > 100:
             limit = 100
+        if offset < 0:
+            offset = 0
 
-        q = query.strip().lower()
+        tokens = [t for t in query.strip().lower().split() if t]
         data = await client.get_llms()
         docs = data.get("docs", [])
-        results = [
-            doc
-            for doc in docs
-            if q
-            in " ".join(
+
+        def match_count(doc: dict[str, Any]) -> int:
+            hay = " ".join(
                 [
                     str(doc.get("title", "")),
                     str(doc.get("description", "")),
@@ -185,14 +196,21 @@ class DocsQueryTool(BaseTool):
                     str(doc.get("path", "")),
                 ]
             ).lower()
-        ]
+            return sum(1 for t in tokens if t in hay)
+
+        scored = [(match_count(doc), i, doc) for i, doc in enumerate(docs)]
+        scored = [(c, i, doc) for c, i, doc in scored if c > 0]
+        scored.sort(key=lambda item: (-item[0], item[1]))
+        results = [doc for _, _, doc in scored]
+        page = results[offset : offset + limit]
         output = {
             "type": "docs_search_result",
             "action": "search",
             "query": query,
             "total": len(results),
-            "count": min(limit, len(results)),
-            "results": results[:limit],
+            "offset": offset,
+            "count": len(page),
+            "results": page,
         }
         return True, output
 

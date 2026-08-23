@@ -1,6 +1,6 @@
 {
     "name": "mofox_docs",
-    "version": "1.1.0",
+    "version": "1.1.1",
     "description": "通过 MoFox-Bot-Docs 文档 JSON API 查询和获取 Neo-MoFox 官方文档，供 LLM 检索与阅读使用",
     "author": "MoFox Community",
     "dependencies": {
