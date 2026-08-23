@@ -2,8 +2,7 @@
 
 封装 MoFox-Bot-Docs 文档站的 JSON API 交互逻辑，仅包含只读查询能力：
 - 获取所有文档（元信息）
-- 按标题 / 路径 / id 搜索
-- 按正文内容搜索
+- 获取 LLM 检索索引（llms.json，含简介与预览，用于关键词过滤）
 - 获取指定文档（含正文）
 
 所有方法均为异步，使用 aiohttp 进行 HTTP 请求。
@@ -12,7 +11,6 @@
 from __future__ import annotations
 
 from typing import Any
-from urllib.parse import quote
 
 import aiohttp
 
@@ -73,31 +71,20 @@ class DocsClient:
         """
         return await self._request("/api/docs/index.json")
 
-    async def search(self, query: str) -> dict[str, Any]:
-        """按标题 / 路径 / id 搜索文档。
+    async def get_llms(self) -> dict[str, Any]:
+        """获取 LLM 检索索引。
 
-        API: GET /api/docs/search.json?q=关键词
+        API: GET /api/docs/llms.json
 
-        Args:
-            query: 搜索关键词
-
-        Returns:
-            响应字典，包含 query、total 与 results 字段
-        """
-        return await self._request(f"/api/docs/search.json?q={quote(query)}")
-
-    async def search_content(self, query: str) -> dict[str, Any]:
-        """按文档正文文字搜索文档。
-
-        API: GET /api/docs/search-content.json?q=关键词
-
-        Args:
-            query: 搜索关键词
+        文档站已移除服务端搜索（search.json / search-content.json），
+        检索请使用本索引：按 section 分组排序，每篇含 title / description /
+        preview（正文前 500 字符），在本地按关键词过滤后，再通过
+        get_doc() 获取完整正文。
 
         Returns:
-            响应字典，包含 query、total 与 results 字段
+            响应字典，包含 title、description、version、total 与 docs 字段
         """
-        return await self._request(f"/api/docs/search-content.json?q={quote(query)}")
+        return await self._request("/api/docs/llms.json")
 
     async def get_doc(self, doc_id: str) -> dict[str, Any]:
         """获取指定文档（含正文文本）。

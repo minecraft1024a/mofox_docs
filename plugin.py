@@ -27,7 +27,7 @@ class MofoxDocsPlugin(BasePlugin):
 
     plugin_name: str = "mofox_docs"
     plugin_description: str = "通过 MoFox-Bot-Docs 文档 JSON API 查询和获取 Neo-MoFox 官方文档"
-    plugin_version: str = "1.0.0"
+    plugin_version: str = "1.1.0"
 
     configs: list[type] = [MofoxDocsConfig]
     dependent_components: list[str] = []

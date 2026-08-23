@@ -2,8 +2,7 @@
 
 提供 LLM 可调用的文档检索能力：
 - 获取所有文档列表
-- 按标题 / 路径 / id 搜索
-- 按正文内容搜索
+- 按关键词检索（基于 llms.json，在本地对标题 / 简介 / 预览过滤）
 - 获取指定文档的完整内容
 
 所有查询均为只读操作，不产生任何副作用。
@@ -38,8 +37,9 @@ class DocsQueryTool(BaseTool):
 
     name: str = "docs_query"
     description: str = (
-        "查询 Neo-MoFox 官方文档。支持按标题搜索、按正文搜索、获取指定文档全文、"
-        "以及列出所有文档。当用户询问框架功能、配置、插件开发、API 用法等问题时使用。"
+        "查询 Neo-MoFox 官方文档。支持列出所有文档、按关键词检索（基于 llms.json "
+        "索引，在本地对标题 / 简介 / 正文预览过滤）、以及获取指定文档全文。"
+        "当用户询问框架功能、配置、插件开发、API 用法等问题时使用。"
     )
 
     def __init__(self, plugin: "BasePlugin") -> None:
@@ -93,18 +93,18 @@ class DocsQueryTool(BaseTool):
         self,
         action: Annotated[
             str,
-            "操作类型：list(列出所有文档) / search(按标题、路径或 id 搜索) "
-            "/ search_content(按正文内容搜索) / get(获取指定文档全文)",
+            "操作类型：list(列出所有文档) / search(按关键词检索 llms.json 索引) "
+            "/ get(获取指定文档全文)",
         ],
-        query: Annotated[str | None, "搜索关键词，仅 search / search_content 使用"] = None,
+        query: Annotated[str | None, "检索关键词，仅 search 使用"] = None,
         doc_id: Annotated[str | None, "文档唯一标识，仅 get 使用，如 guides/configuration/bot_config_guide"] = None,
-        limit: Annotated[int, "返回结果数量限制，仅 list / search / search_content 使用"] = 20,
+        limit: Annotated[int, "返回结果数量限制，仅 list / search 使用"] = 20,
     ) -> tuple[bool, str | dict[str, Any]]:
         """执行文档查询操作。
 
         Args:
             action: 操作类型
-            query: 搜索关键词
+            query: 检索关键词
             doc_id: 文档唯一标识
             limit: 结果数量限制
 
@@ -118,13 +118,9 @@ class DocsQueryTool(BaseTool):
                 return await self._handle_list(client, limit)
             if action == "search":
                 return await self._handle_search(client, query, limit)
-            if action == "search_content":
-                return await self._handle_search_content(client, query, limit)
             if action == "get":
                 return await self._handle_get(client, doc_id)
-            return False, (
-                f"不支持的操作类型: {action}。支持的类型: list, search, search_content, get"
-            )
+            return False, f"不支持的操作类型: {action}。支持的类型: list, search, get"
         except DocsClientError as e:
             logger.error(f"文档查询失败: action={action}, query={query}, doc_id={doc_id} - {e}")
             return False, f"文档查询失败: {e}"
@@ -158,36 +154,43 @@ class DocsQueryTool(BaseTool):
     async def _handle_search(
         self, client: DocsClient, query: str | None, limit: int
     ) -> tuple[bool, str | dict[str, Any]]:
-        """处理按标题 / 路径 / id 搜索操作。"""
-        if not query:
-            return False, "搜索文档时必须提供 query 参数"
+        """处理按关键词检索操作。
 
-        data = await client.search(query)
-        results = data.get("results", [])
+        文档站已移除服务端搜索，改为拉取 llms.json 索引后在本地过滤：
+        匹配 title / description / preview / section / id / path。
+        命中结果不含完整正文，需要全文时再用 action="get" 获取。
+        """
+        if not query:
+            return False, "检索文档时必须提供 query 参数"
+
+        if limit < 1:
+            limit = 1
+        if limit > 100:
+            limit = 100
+
+        q = query.strip().lower()
+        data = await client.get_llms()
+        docs = data.get("docs", [])
+        results = [
+            doc
+            for doc in docs
+            if q
+            in " ".join(
+                [
+                    str(doc.get("title", "")),
+                    str(doc.get("description", "")),
+                    str(doc.get("preview", "")),
+                    str(doc.get("section", "")),
+                    str(doc.get("id", "")),
+                    str(doc.get("path", "")),
+                ]
+            ).lower()
+        ]
         output = {
             "type": "docs_search_result",
             "action": "search",
-            "query": data.get("query", query),
-            "total": data.get("total", len(results)),
-            "count": min(limit, len(results)),
-            "results": results[:limit],
-        }
-        return True, output
-
-    async def _handle_search_content(
-        self, client: DocsClient, query: str | None, limit: int
-    ) -> tuple[bool, str | dict[str, Any]]:
-        """处理按正文内容搜索操作。"""
-        if not query:
-            return False, "按正文搜索时必须提供 query 参数"
-
-        data = await client.search_content(query)
-        results = data.get("results", [])
-        output = {
-            "type": "docs_content_search_result",
-            "action": "search_content",
-            "query": data.get("query", query),
-            "total": data.get("total", len(results)),
+            "query": query,
+            "total": len(results),
             "count": min(limit, len(results)),
             "results": results[:limit],
         }
