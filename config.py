@@ -21,8 +21,8 @@ class MofoxDocsConfig(BaseConfig):
         """文档站服务连接配置。"""
 
         base_url: str = Field(
-            default="https://docs.mofox-sama.com",
-            description="MoFox-Bot-Docs 文档站地址，如 https://docs.mofox-sama.com",
+            default="https://docs.mofox.chat",
+            description="MoFox-Bot-Docs 文档站地址，如 https://docs.mofox.chat",
             label="文档站地址",
             tag="network",
             order=0,

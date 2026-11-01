@@ -75,7 +75,7 @@ class DocsQueryTool(BaseTool):
         """从配置获取文档站地址。"""
         if self._config:
             return self._config.server.base_url
-        return "https://docs.mofox-sama.com"
+        return "https://docs.mofox.chat"
 
     def _get_timeout(self) -> int:
         """从配置获取请求超时时间。"""

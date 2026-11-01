@@ -27,7 +27,7 @@ class DocsClient:
     """MoFox-Bot-Docs 文档 JSON API 客户端。
 
     Args:
-        base_url: 文档站地址，如 "https://docs.mofox-sama.com"
+        base_url: 文档站地址，如 "https://docs.mofox.chat"
         timeout: 请求超时时间（秒）
     """
 
